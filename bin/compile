@@ -113,58 +113,22 @@ if [[ ${#SOLUTION_FILE} -eq 0 ]]; then
 	PROJECT_FILE="$(get_project_file "$BUILD_DIR")"
 
 	# Get app assembly name from project file
-	APP_ASSEMBLY="$(get_project_name "$BUILD_DIR")"
+	APP_ASSEMBLY="CleanArch.Service.WebApi"
 	print "The assembly name: ${APP_ASSEMBLY}"
-	echo "export APP_ASSEMBLY=\"$(get_project_name "$BUILD_DIR")\"" >> "$PROFILE_PATH"
+	echo "export APP_ASSEMBLY=\"$APP_ASSEMBLY\"" >> "$PROFILE_PATH"
 
-	RELEASE_DIR="${APP_ASSEMBLY}_Release"
-	echo "export RELEASE_DIR=\"${APP_ASSEMBLY}_Release\"" >> "$PROFILE_PATH"
+	RELEASE_DIR="Release"
+	echo "export RELEASE_DIR=\"${RELEASE_DIR}\"" >> "$PROFILE_PATH"
 	cd "$BUILD_DIR"
 	
 	STARTUP_PROJECT="$BUILD_DIR/$APP_ASSEMBLY/$APP_ASSEMBLY.csproj"
 	dotnet publish "$STARTUP_PROJECT" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained --verbosity detailed || BUILD_RESULT=$?
 
 	print "Listing published files:"
-        ls -R "$BUILD_DIR/$RELEASE_DIR"
+    ls -R "$BUILD_DIR/$RELEASE_DIR"
 else
 	# Get app assembly name from project file
-	APP_ASSEMBLY="$(get_start_project_name "$BUILD_DIR")"
+	APP_ASSEMBLY="CleanArch.Service.WebApi"
 	print "The assembly name: ${APP_ASSEMBLY}"
-	echo "export APP_ASSEMBLY=\"$(get_start_project_name "$BUILD_DIR")\"" >> "$PROFILE_PATH"
+	echo "export APP_ASSEMBLY=\"$APP_ASSEMBLY\"" >> "$PROFILE_PATH"
 	
-	# Get solution name from build directory
-	SOLUTION_NAME="$(get_project_sln_name "$BUILD_DIR")"
-	print "The solution name: ${SOLUTION_NAME}"
-	
-	RELEASE_DIR="${SOLUTION_NAME}_Release"
-	echo "export RELEASE_DIR=\"${SOLUTION_NAME}_Release\"" >> "$PROFILE_PATH"
-	cd "$BUILD_DIR"
-	dotnet new tool-manifest
-	dotnet tool install dotnet-ef --version 9.*
-	export PATH="$PATH:/app/.dotnet/tools"
-	dotnet tool run dotnet-ef migrations list --startup-project "$APP_ASSEMBLY" --context AppDbContext
-	dotnet tool run dotnet-ef database update --startup-project "$APP_ASSEMBLY" --context AppDbContext
-	dotnet publish "$SOLUTION_FILE" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained --verbosity detailed || BUILD_RESULT=$?
-fi
-
-# Check if the build failed
-if [[ $BUILD_RESULT -ne 0 ]]; then
-    echo "Build failed. Please check the logs above for detailed error messages."
-    exit 1
-fi
-
-# Ensure DLL exists
-if [[ ! -f "$BUILD_DIR/$RELEASE_DIR/$APP_ASSEMBLY.dll" ]]; then
-    echo "Error: DLL not found in the expected output directory."
-    exit 1
-fi
-
-# Remove src files in production machine
-find -maxdepth 1 ! -name Procfile ! -name .profile.d ! -name .apt ! -name .dotnet ! -name .heroku ! -name node_modules ! -name "$RELEASE_DIR" -exec rm -rv {} \; > /dev/null 2>&1;
-
-if [[ -n "$APP_ASSEMBLY" ]]; then
-# Create procfile and Add process type to that 
-cat << EOT >> "${BUILD_DIR}/Procfile"
-web: cd \$HOME/$RELEASE_DIR && dotnet "./$APP_ASSEMBLY.dll" --urls http://+:\$PORT
-EOT
-fi
