@@ -108,44 +108,14 @@ dotnet --list-runtimes
 
 BUILD_RESULT=0
 
-if [[ ${#SOLUTION_FILE} -eq 0 ]]; then
-	# Get project file from build directory
-	PROJECT_FILE="$(get_project_file "$BUILD_DIR")"
+APP_ASSEMBLY="CleanArch.Service.WebApi"
+RELEASE_DIR="Release"
+STARTUP_PROJECT="$BUILD_DIR/$APP_ASSEMBLY/$APP_ASSEMBLY.csproj"
 
-	# Get app assembly name from project file
-	APP_ASSEMBLY="CleanArch.Service.WebApi"
-	print "The assembly name: ${APP_ASSEMBLY}"
-	echo "export APP_ASSEMBLY=\"$APP_ASSEMBLY\"" >> "$PROFILE_PATH"
+dotnet publish "$STARTUP_PROJECT" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained --verbosity detailed || BUILD_RESULT=$?
 
-	RELEASE_DIR="Release"
-	echo "export RELEASE_DIR=\"${RELEASE_DIR}\"" >> "$PROFILE_PATH"
-	cd "$BUILD_DIR"
-	
-	STARTUP_PROJECT="$BUILD_DIR/$APP_ASSEMBLY/$APP_ASSEMBLY.csproj"
-	dotnet publish "$STARTUP_PROJECT" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained --verbosity detailed || BUILD_RESULT=$?
-
-	print "Listing published files:"
-    ls -R "$BUILD_DIR/$RELEASE_DIR"
-else
-	# Get app assembly name from project file
-	APP_ASSEMBLY="CleanArch.Service.WebApi"
-	print "The assembly name: ${APP_ASSEMBLY}"
-	echo "export APP_ASSEMBLY=\"$APP_ASSEMBLY\"" >> "$PROFILE_PATH"
-	
-	# Get solution name from build directory
-	SOLUTION_NAME="$(get_project_sln_name "$BUILD_DIR")"
-	print "The solution name: ${SOLUTION_NAME}"
-	
-	RELEASE_DIR="${SOLUTION_NAME}_Release"
-	echo "export RELEASE_DIR=\"${SOLUTION_NAME}_Release\"" >> "$PROFILE_PATH"
-	cd "$BUILD_DIR"
-	dotnet new tool-manifest
-	dotnet tool install dotnet-ef --version 9.*
-	export PATH="$PATH:/app/.dotnet/tools"
-	dotnet tool run dotnet-ef migrations list --startup-project "$APP_ASSEMBLY" --context AppDbContext
-	dotnet tool run dotnet-ef database update --startup-project "$APP_ASSEMBLY" --context AppDbContext
-	dotnet publish "$SOLUTION_FILE" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained --verbosity detailed || BUILD_RESULT=$?
-fi
+print "Listing published files:"
+ls -R "$BUILD_DIR/$RELEASE_DIR"
 
 # Check if the build failed
 if [[ $BUILD_RESULT -ne 0 ]]; then
@@ -155,7 +125,7 @@ fi
 
 # Ensure DLL exists
 if [[ ! -f "$BUILD_DIR/$RELEASE_DIR/$APP_ASSEMBLY.dll" ]]; then
-    echo "Error: DLL not found in the expected output directory."
+    echo "Error: DLL not found in the expected output directory: $BUILD_DIR/$RELEASE_DIR/$APP_ASSEMBLY.dll"
     exit 1
 fi
 
