@@ -127,7 +127,9 @@ if [[ ${#SOLUTION_FILE} -eq 0 ]]; then
 	
 	# https://docs.microsoft.com/en-us/dotnet/core/tools/dotnet-publish?tabs=netcore21
 	# dotnet publish [<PROJECT>]
-	dotnet publish $PROJECT_FILE --output $BUILD_DIR/$RELEASE_DIR --configuration Release --runtime linux-x64 --no-self-contained
+
+	STARTUP_PROJECT="$BUILD_DIR/$APP_ASSEMBLY/$APP_ASSEMBLY.csproj"
+	dotnet publish "$STARTUP_PROJECT" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained
 
 	print "Listing published files:"
         ls -R $BUILD_DIR/$RELEASE_DIR
