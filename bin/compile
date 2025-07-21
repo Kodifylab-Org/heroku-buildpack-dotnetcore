@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# bin/compile <build-dir> <cache-dir> <env-dir>
 
+# bin/compile <build-dir> <cache-dir> <env-dir>
 ### Configure environment
 
 set -o errexit
@@ -32,51 +32,114 @@ print "Stack version: ${STACK}"
 
 print "Installing prerequisites for .NET Core on Ubuntu"
 if [[ $herokuos_version == "16.04" ]]; then
-	apt_install libicu55 openssl1.0
+    apt_install libicu55 openssl1.0
 elif [[ $herokuos_version == "18.04" ]]; then
-	apt_install libicu60 openssl1.0
+    apt_install libicu60 openssl1.0
 elif [[ $herokuos_version == "19.04" ]]; then
-	apt_install libicu63 libssl1.1
+    apt_install libicu63 libssl1.1
 elif [[ $herokuos_version == "20.04" ]]; then
-   	apt_install libicu66 libssl1.1
+    apt_install libicu66 libssl1.1
 elif [[ $herokuos_version == "22.04" ]]; then
-   	apt_install apt-transport-https libicu70 libssl3 libunwind8 libgssapi-krb5-2 libc6 liblttng-ust1
+    apt_install apt-transport-https libicu70 libssl3 libunwind8 libgssapi-krb5-2 libc6 liblttng-ust1
 fi
 
+# Skip TELEMETRY_OPTOUT on production environment
 export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export ASPNETCORE_ENVIRONMENT=production
 
-PROJECT_FILE="CleanArch.Service.WebApi/CleanArch.Service.WebApi.csproj"
+while IFS='' read -r -d '' filename; do
+    declare project_dir
+
+    # Get project directory path
+    project_dir=$(dirname "$filename")
+    print "The project directory path: ${project_dir}"
+
+    # Get netcore framework version
+    framework_version="$(get_framework_version "$project_dir")"
+    print "The netcore framework version: ${framework_version}"
+
+    # Get dotnet runtime version
+    runtime_framework_version="$(get_specific_version "$BUILD_DIR")"
+    if [[ -z $runtime_framework_version ]]; then
+        runtime_framework_version="$(get_runtime_framework_version "$project_dir")"
+    fi
+    print "The dotnet runtime version: ${runtime_framework_version} to be installed"
+
+    # dotnet installation
+    $BP_DIR/bin/util/dotnet-install.sh --architecture x64 --channel 9.0 --version "$runtime_framework_version" --install-dir "$BUILD_DIR/.dotnet"
+
+    break
+done < <(find "$BUILD_DIR" -maxdepth 2 -name "*.csproj" -print0)
+
+# Add symbolic link for dotnet
+if [[ $BUILD_DIR != '/app' ]]; then
+    # Subsequent buildpacks can still invoke it
+    ln -s "${BUILD_DIR}/.dotnet" "$HOME"
+fi
+
+# Add dotnet runtime path to environment variable that is available to access dotnet command
+export PATH="$PATH:$HOME/.dotnet"
+
+PROFILE_PATH="$BUILD_DIR/.profile.d/dotnetcore.sh"
+mkdir -p "$(dirname "$PROFILE_PATH")"
+
+# Export vars
+{
+    echo 'export DOTNET_ROOT=$HOME/.dotnet'
+    echo 'export PATH=$PATH:$DOTNET_ROOT:$DOTNET_ROOT/tools'
+    echo 'export PATH="$PATH:$HOME/.dotnet:$HOME/.apt/usr/bin"'
+    echo 'export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$HOME/.apt/usr/lib/x86_64-linux-gnu:$HOME/.apt/usr/lib/i386-linux-gnu:$HOME/.apt/usr/lib"'
+    echo 'export LIBRARY_PATH="$LIBRARY_PATH:$HOME/.apt/usr/lib/x86_64-linux-gnu:$HOME/.apt/usr/lib/i386-linux-gnu:$HOME/.apt/usr/lib"'
+    echo 'export INCLUDE_PATH="$INCLUDE_PATH:$HOME/.apt/usr/include"'
+    echo 'export CPATH="$INCLUDE_PATH"'
+    echo 'export CPPPATH="$INCLUDE_PATH"'
+    echo "export DOTNET_CLI_TELEMETRY_OPTOUT=1"
+} >> "$PROFILE_PATH"
+
+# Get solution file from build directory
+SOLUTION_FILE="$(get_project_sln_file "$BUILD_DIR")"
+
+dotnet --list-runtimes
+
+BUILD_RESULT=0
+
 APP_ASSEMBLY="CleanArch.Service.WebApi"
-RELEASE_DIR="$APP_ASSEMBLY_Release"
+RELEASE_DIR="Release"
+STARTUP_PROJECT="$BUILD_DIR/$APP_ASSEMBLY/$APP_ASSEMBLY.csproj"
 
-cd "$BUILD_DIR"
-
-print "Publishing $PROJECT_FILE..."
-dotnet publish "$PROJECT_FILE" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained --verbosity detailed
+dotnet publish "$STARTUP_PROJECT" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained --verbosity detailed || BUILD_RESULT=$?
 
 print "Listing published files:"
 ls -R "$BUILD_DIR/$RELEASE_DIR"
 
-APP_DLL="$BUILD_DIR/$RELEASE_DIR/$APP_ASSEMBLY.dll"
-if [ ! -f "$APP_DLL" ]; then
-    echo "Error: DLL not found at $APP_DLL"
+# Check if the build failed
+if [[ $BUILD_RESULT -ne 0 ]]; then
+    echo "Build failed. Please check the logs above for detailed error messages."
+    exit 1
+fi
+
+# Ensure DLL exists
+if [[ ! -f "$BUILD_DIR/$RELEASE_DIR/$APP_ASSEMBLY.dll" ]]; then
+    echo "Error: DLL not found in the expected output directory: $BUILD_DIR/$RELEASE_DIR/$APP_ASSEMBLY.dll"
     exit 1
 fi
 
 # Run database migrations
-print "Running migrations..."
 dotnet new tool-manifest
 dotnet tool install dotnet-ef --version 9.*
 export PATH="$PATH:$BUILD_DIR/.dotnet/tools"
-dotnet tool run dotnet-ef migrations list --startup-project "$APP_ASSEMBLY" --context AppDbContext
-dotnet tool run dotnet-ef database update --startup-project "$APP_ASSEMBLY" --context AppDbContext
 
+# Make sure to replace 'AppDbContext' with your actual context name
+dotnet tool run dotnet-ef migrations list --startup-project "$STARTUP_PROJECT" --context AppDbContext
+dotnet tool run dotnet-ef database update --startup-project "$STARTUP_PROJECT" --context AppDbContext
+
+# Remove src files in production machine
 find -maxdepth 1 ! -name Procfile ! -name .profile.d ! -name .apt ! -name .dotnet ! -name .heroku ! -name node_modules ! -name "$RELEASE_DIR"  -exec rm -rv {} \; > /dev/null 2>&1;
 
 if [[ -n "$APP_ASSEMBLY" ]]; then
-cat << EOT >> "${BUILD_DIR}/Procfile"
+    # Create procfile and Add process type to that 
+    cat << EOT >> "${BUILD_DIR}/Procfile"
 web: cd \$HOME/$RELEASE_DIR && dotnet "./$APP_ASSEMBLY.dll" --urls http://+:\$PORT
 EOT
 fi
