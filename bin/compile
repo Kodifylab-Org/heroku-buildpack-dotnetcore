@@ -47,77 +47,14 @@ export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export ASPNETCORE_ENVIRONMENT=production
 
-while IFS='' read -r -d '' filename; do
-	project_dir=$(dirname "$filename")
-	print "The project directory path: ${project_dir}"
-	
-	framework_version="$(get_framework_version "$project_dir")"
-	print "The netcore framework version: ${framework_version}"
+PROJECT_FILE="CleanArch.Service.WebApi/CleanArch.Service.WebApi.csproj"
+APP_ASSEMBLY="CleanArch.Service.WebApi"
+RELEASE_DIR="$APP_ASSEMBLY_Release"
 
-	runtime_framework_version="$(get_specific_version "$BUILD_DIR")"
-	if [[ -z $runtime_framework_version ]]; then	
-		runtime_framework_version="$(get_runtime_framework_version "$project_dir")"		
-	fi
-	print "The dotnet runtime version: ${runtime_framework_version} to be installed"
+cd "$BUILD_DIR"
 
-	$BP_DIR/bin/util/dotnet-install.sh --architecture x64 --channel "$framework_version" --version "$runtime_framework_version" --install-dir "$BUILD_DIR/.dotnet"
-	break
-
-done < <(find "$BUILD_DIR" -maxdepth 2 -name "*.csproj" -print0)
-
-if [[ $BUILD_DIR != '/app' ]]; then
-	ln -s "${BUILD_DIR}/.dotnet" "$HOME"
-fi
-
-export PATH="$PATH:$HOME/.dotnet"
-
-PROFILE_PATH="$BUILD_DIR/.profile.d/dotnetcore.sh"
-mkdir -p "$(dirname "$PROFILE_PATH")"
-
-{
-    echo 'export DOTNET_ROOT=$HOME/.dotnet'
-    echo 'export PATH=$PATH:$DOTNET_ROOT:$DOTNET_ROOT/tools'
-    echo 'export PATH="$PATH:$HOME/.dotnet:$HOME/.apt/usr/bin"'
-    echo 'export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$HOME/.apt/usr/lib/x86_64-linux-gnu:$HOME/.apt/usr/lib/i386-linux-gnu:$HOME/.apt/usr/lib"'
-    echo 'export LIBRARY_PATH="$LIBRARY_PATH:$HOME/.apt/usr/lib/x86_64-linux-gnu:$HOME/.apt/usr/lib/i386-linux-gnu:$HOME/.apt/usr/lib"'
-    echo 'export INCLUDE_PATH="$INCLUDE_PATH:$HOME/.apt/usr/include"'
-    echo 'export CPATH="$INCLUDE_PATH"'
-    echo 'export CPPPATH="$INCLUDE_PATH"'
-    echo "export DOTNET_CLI_TELEMETRY_OPTOUT=1"
-} >> "$PROFILE_PATH"
-
-SOLUTION_FILE="$(get_project_sln_file "$BUILD_DIR")"
-
-dotnet --list-runtimes
-
-if [[ -z "$SOLUTION_FILE" ]]; then
-	PROJECT_FILE="$(get_project_file "$BUILD_DIR")"
-	APP_ASSEMBLY="$(get_project_name "$BUILD_DIR")"
-	print "The assembly name: ${APP_ASSEMBLY}"
-	echo "export APP_ASSEMBLY=\"$APP_ASSEMBLY\"" >> "$PROFILE_PATH"
-
-	RELEASE_DIR="${APP_ASSEMBLY}_Release"
-	echo "export RELEASE_DIR=\"$RELEASE_DIR\"" >> "$PROFILE_PATH"
-	cd "$BUILD_DIR"
-	dotnet publish "$PROJECT_FILE" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained --verbosity detailed
-else
-	APP_ASSEMBLY="$(get_start_project_name "$BUILD_DIR")"
-	print "The assembly name: ${APP_ASSEMBLY}"
-	echo "export APP_ASSEMBLY=\"$APP_ASSEMBLY\"" >> "$PROFILE_PATH"
-	
-	SOLUTION_NAME="$(get_project_sln_name "$BUILD_DIR")"
-	print "The solution name: ${SOLUTION_NAME}"
-	
-	RELEASE_DIR="${SOLUTION_NAME}_Release"
-	echo "export RELEASE_DIR=\"$RELEASE_DIR\"" >> "$PROFILE_PATH"
-	cd "$BUILD_DIR"
-	dotnet new tool-manifest
-	dotnet tool install dotnet-ef --version 9.*
-	export PATH="$PATH:$BUILD_DIR/.dotnet/tools"
-	dotnet tool run dotnet-ef migrations list --startup-project "$APP_ASSEMBLY" --context AppDbContext
-	dotnet tool run dotnet-ef database update --startup-project "$APP_ASSEMBLY" --context AppDbContext
-	dotnet publish "$SOLUTION_FILE" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained --verbosity detailed
-fi
+print "Publishing $PROJECT_FILE..."
+dotnet publish "$PROJECT_FILE" --output "$BUILD_DIR/$RELEASE_DIR" --configuration Release --runtime linux-x64 --no-self-contained --verbosity detailed
 
 print "Listing published files:"
 ls -R "$BUILD_DIR/$RELEASE_DIR"
@@ -127,6 +64,14 @@ if [ ! -f "$APP_DLL" ]; then
     echo "Error: DLL not found at $APP_DLL"
     exit 1
 fi
+
+# Run database migrations
+print "Running migrations..."
+dotnet new tool-manifest
+dotnet tool install dotnet-ef --version 9.*
+export PATH="$PATH:$BUILD_DIR/.dotnet/tools"
+dotnet tool run dotnet-ef migrations list --startup-project "$APP_ASSEMBLY" --context AppDbContext
+dotnet tool run dotnet-ef database update --startup-project "$APP_ASSEMBLY" --context AppDbContext
 
 find -maxdepth 1 ! -name Procfile ! -name .profile.d ! -name .apt ! -name .dotnet ! -name .heroku ! -name node_modules ! -name "$RELEASE_DIR"  -exec rm -rv {} \; > /dev/null 2>&1;
 
